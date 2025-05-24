@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect } from "react";
 import type { Category, Product, Order, User, AppSettings } from "../types";
-import * as storage from "../utils/storage";
 
 interface AppState {
   categories: Category[];
@@ -11,6 +10,14 @@ interface AppState {
   settings: AppSettings;
   selectedCategory: string;
   darkMode: boolean;
+  favorites: string[];
+  orderHistory: Array<{
+    id: string;
+    establishmentName: string;
+    date: string;
+    products: Product[];
+  }>;
+  orderNumber: number;
 }
 
 type AppAction =
@@ -30,6 +37,9 @@ type AppAction =
   | { type: "SET_SETTINGS"; payload: AppSettings }
   | { type: "SET_SELECTED_CATEGORY"; payload: string }
   | { type: "TOGGLE_DARK_MODE" }
+  | { type: "SET_FAVORITES"; payload: string[] }
+  | { type: "SET_ORDER_HISTORY"; payload: AppState["orderHistory"] }
+  | { type: "SET_ORDER_NUMBER"; payload: number }
   | { type: "LOAD_STATE"; payload: AppState };
 
 const initialState: AppState = {
@@ -38,9 +48,17 @@ const initialState: AppState = {
   orders: [],
   users: [],
   currentUser: null,
-  settings: storage.getSettings(),
+  settings: {
+    darkMode: false,
+    language: "en",
+    currency: "USD",
+    notifications: true,
+  },
   selectedCategory: "",
-  darkMode: storage.getSettings().darkMode,
+  darkMode: false,
+  favorites: [],
+  orderHistory: [],
+  orderNumber: 1,
 };
 
 const AppContext = createContext<{
@@ -51,29 +69,23 @@ const AppContext = createContext<{
 function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "SET_CATEGORIES":
-      storage.saveCategories(action.payload);
       return { ...state, categories: action.payload };
 
     case "ADD_CATEGORY":
-      const newCategories = [...state.categories, action.payload];
-      storage.saveCategories(newCategories);
-      return { ...state, categories: newCategories };
+      return { ...state, categories: [...state.categories, action.payload] };
 
     case "UPDATE_CATEGORY":
-      const updatedCategories = state.categories.map((cat) =>
-        cat.id === action.payload.id ? action.payload : cat
-      );
-      storage.saveCategories(updatedCategories);
-      return { ...state, categories: updatedCategories };
-
-    case "DELETE_CATEGORY":
-      const filteredCategories = state.categories.filter(
-        (cat) => cat.id !== action.payload
-      );
-      storage.saveCategories(filteredCategories);
       return {
         ...state,
-        categories: filteredCategories,
+        categories: state.categories.map((cat) =>
+          cat.id === action.payload.id ? action.payload : cat
+        ),
+      };
+
+    case "DELETE_CATEGORY":
+      return {
+        ...state,
+        categories: state.categories.filter((cat) => cat.id !== action.payload),
         products: state.products.filter(
           (p) =>
             state.categories.find((c) => c.id === action.payload)?.name !==
@@ -87,64 +99,66 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
 
     case "SET_PRODUCTS":
-      storage.saveProducts(action.payload);
       return { ...state, products: action.payload };
 
     case "ADD_PRODUCT":
-      const newProducts = [...state.products, action.payload];
-      storage.saveProducts(newProducts);
-      return { ...state, products: newProducts };
+      return { ...state, products: [...state.products, action.payload] };
 
     case "UPDATE_PRODUCT":
-      const updatedProducts = state.products.map((prod) =>
-        prod.id === action.payload.id ? action.payload : prod
-      );
-      storage.saveProducts(updatedProducts);
-      return { ...state, products: updatedProducts };
+      return {
+        ...state,
+        products: state.products.map((prod) =>
+          prod.id === action.payload.id ? action.payload : prod
+        ),
+      };
 
     case "DELETE_PRODUCT":
-      const filteredProducts = state.products.filter(
-        (prod) => prod.id !== action.payload
-      );
-      storage.saveProducts(filteredProducts);
-      return { ...state, products: filteredProducts };
+      return {
+        ...state,
+        products: state.products.filter((prod) => prod.id !== action.payload),
+      };
 
     case "SET_ORDERS":
-      storage.saveOrders(action.payload);
       return { ...state, orders: action.payload };
 
     case "ADD_ORDER":
-      const newOrders = [...state.orders, action.payload];
-      storage.saveOrders(newOrders);
-      return { ...state, orders: newOrders };
+      return { ...state, orders: [...state.orders, action.payload] };
 
     case "UPDATE_ORDER":
-      const updatedOrders = state.orders.map((order) =>
-        order.id === action.payload.id ? action.payload : order
-      );
-      storage.saveOrders(updatedOrders);
-      return { ...state, orders: updatedOrders };
+      return {
+        ...state,
+        orders: state.orders.map((order) =>
+          order.id === action.payload.id ? action.payload : order
+        ),
+      };
 
     case "SET_USERS":
-      storage.saveUsers(action.payload);
       return { ...state, users: action.payload };
 
     case "SET_CURRENT_USER":
-      storage.setCurrentUser(action.payload);
       return { ...state, currentUser: action.payload };
 
     case "SET_SETTINGS":
-      storage.saveSettings(action.payload);
       return { ...state, settings: action.payload };
 
     case "SET_SELECTED_CATEGORY":
       return { ...state, selectedCategory: action.payload };
 
     case "TOGGLE_DARK_MODE":
-      const newDarkMode = !state.darkMode;
-      const newSettings = { ...state.settings, darkMode: newDarkMode };
-      storage.saveSettings(newSettings);
-      return { ...state, darkMode: newDarkMode, settings: newSettings };
+      return {
+        ...state,
+        darkMode: !state.darkMode,
+        settings: { ...state.settings, darkMode: !state.darkMode },
+      };
+
+    case "SET_FAVORITES":
+      return { ...state, favorites: action.payload };
+
+    case "SET_ORDER_HISTORY":
+      return { ...state, orderHistory: action.payload };
+
+    case "SET_ORDER_NUMBER":
+      return { ...state, orderNumber: action.payload };
 
     case "LOAD_STATE":
       return action.payload;

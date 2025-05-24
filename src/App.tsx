@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   PlusIcon,
   MinusIcon,
@@ -15,16 +15,16 @@ import {
   StarIcon,
   ClockIcon,
   ArrowPathIcon,
+  InformationCircleIcon,
 } from "@heroicons/react/24/solid";
-import { useRef } from "react";
-import { useReactToPrint } from "react-to-print";
-import { AppProvider, useApp } from "./context/AppContext";
+import { useApp, AppProvider } from "./context/AppContext";
 import { Button } from "./components/Button";
 import { Input } from "./components/Input";
 import { Card } from "./components/Card";
 import { Modal } from "./components/Modal";
 import type { Category, Product } from "./types";
 import { motion, AnimatePresence } from "framer-motion";
+import { useReactToPrint } from "react-to-print";
 
 function AppContent() {
   const { state, dispatch } = useApp();
@@ -68,6 +68,55 @@ function AppContent() {
   const [editingOrder, setEditingOrder] = useState<
     (typeof orderHistory)[0] | null
   >(null);
+
+  // Load initial state from localStorage
+  useEffect(() => {
+    // Load favorites
+    const savedFavorites = localStorage.getItem("favorites");
+    if (savedFavorites) {
+      try {
+        setFavorites(JSON.parse(savedFavorites));
+      } catch (error) {
+        console.error("Failed to load favorites:", error);
+        setFavorites([]);
+      }
+    }
+
+    // Load order history
+    const savedOrderHistory = localStorage.getItem("orderHistory");
+    if (savedOrderHistory) {
+      try {
+        setOrderHistory(JSON.parse(savedOrderHistory));
+      } catch (error) {
+        console.error("Failed to load order history:", error);
+        setOrderHistory([]);
+      }
+    }
+
+    // Load order number
+    const savedOrderNumber = localStorage.getItem("orderNumber");
+    if (savedOrderNumber) {
+      try {
+        setOrderNumber(parseInt(savedOrderNumber, 10));
+      } catch (error) {
+        console.error("Failed to load order number:", error);
+        setOrderNumber(1);
+      }
+    }
+  }, []);
+
+  // Save state to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("favorites", JSON.stringify(favorites));
+  }, [favorites]);
+
+  useEffect(() => {
+    localStorage.setItem("orderHistory", JSON.stringify(orderHistory));
+  }, [orderHistory]);
+
+  useEffect(() => {
+    localStorage.setItem("orderNumber", orderNumber.toString());
+  }, [orderNumber]);
 
   const getCleanTableContent = (establishmentName: string) => {
     return `
@@ -231,12 +280,8 @@ function AppContent() {
           ),
         };
         setOrderHistory((prev) => [newOrder, ...prev].slice(0, 10));
-        localStorage.setItem(
-          "orderHistory",
-          JSON.stringify([newOrder, ...orderHistory].slice(0, 10))
-        );
+        setOrderNumber((prev) => prev + 1);
       }
-      setOrderNumber((prev) => prev + 1);
     },
     onPrintError: (error: Error) => {
       console.error("Print failed:", error);
@@ -270,10 +315,6 @@ function AppContent() {
       ),
     };
     setOrderHistory((prev) => [newOrder, ...prev].slice(0, 10));
-    localStorage.setItem(
-      "orderHistory",
-      JSON.stringify([newOrder, ...orderHistory].slice(0, 10))
-    );
     setOrderNumber((prev) => prev + 1);
   };
 
@@ -471,28 +512,12 @@ function AppContent() {
     return () => window.removeEventListener("keydown", handleKeyPress);
   }, []);
 
-  // Load favorites from localStorage
-  useEffect(() => {
-    const savedFavorites = localStorage.getItem("favorites");
-    if (savedFavorites) {
-      setFavorites(JSON.parse(savedFavorites));
-    }
-  }, []);
-
   // Filter products based on search query
   const filteredProducts = state.products.filter(
     (product) =>
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       product.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  // Load order history from localStorage
-  useEffect(() => {
-    const savedOrderHistory = localStorage.getItem("orderHistory");
-    if (savedOrderHistory) {
-      setOrderHistory(JSON.parse(savedOrderHistory));
-    }
-  }, []);
 
   // Add this function to check if any products have quantities
   const hasProductsWithQuantities = () => {
@@ -962,7 +987,27 @@ function AppContent() {
 
         {/* Categories Section */}
         <Card
-          title="Categories"
+          title={
+            <div className="flex items-center gap-2">
+              Categories
+              <div className="relative group">
+                <InformationCircleIcon className="h-5 w-5 text-gray-400 hover:text-gray-600 cursor-help" />
+                <div className="fixed transform -translate-x-1/2 -translate-y-full mt-[-8px] w-72 p-3 bg-gray-800 text-white text-sm rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-[100]">
+                  <p className="mb-2 font-medium">Quick Guide:</p>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>Enter your category name and press +</li>
+                    <li>Select a category to add products to it</li>
+                    <li>Enter product name and press + to add it</li>
+                    <li>
+                      Right-click on categories/products to edit or delete
+                    </li>
+                    <li>Use the quantity controls to set box/bottle amounts</li>
+                  </ol>
+                  <div className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 bg-gray-800 rotate-45"></div>
+                </div>
+              </div>
+            </div>
+          }
           className={state.darkMode ? "bg-gray-800 border-gray-700" : ""}
           headerRight={
             state.categories.length > 0 && (
