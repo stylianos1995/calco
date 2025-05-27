@@ -18,6 +18,9 @@ import {
   InformationCircleIcon,
 } from "@heroicons/react/24/solid";
 import { useApp, AppProvider } from "./context/AppContext";
+import { useOrderHistory, type Order } from "./hooks/useOrderHistory";
+import { Header } from "./components/layout/Header";
+import { ProductItem } from "./components/products/ProductItem";
 import { Button } from "./components/Button";
 import { Input } from "./components/Input";
 import { Card } from "./components/Card";
@@ -28,6 +31,8 @@ import { useReactToPrint } from "react-to-print";
 
 function AppContent() {
   const { state, dispatch } = useApp();
+  const { orderHistory, orderNumber, addOrder, deleteOrder, updateOrder } =
+    useOrderHistory();
   const [newProduct, setNewProduct] = useState({ name: "", category: "" });
   const [newCategory, setNewCategory] = useState("");
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -45,18 +50,6 @@ function AppContent() {
   }>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>([]);
-  const [orderHistory, setOrderHistory] = useState<
-    Array<{
-      id: string;
-      establishmentName: string;
-      date: string;
-      products: Product[];
-    }>
-  >([]);
-  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
-  const [previewContent, setPreviewContent] = useState("");
-  const printRef = useRef<HTMLDivElement>(null);
-  const [orderNumber, setOrderNumber] = useState(1);
   const [showFavorites, setShowFavorites] = useState(false);
   const [showPrintOptions, setShowPrintOptions] = useState(false);
   const [showOrderHistory, setShowOrderHistory] = useState(false);
@@ -68,6 +61,7 @@ function AppContent() {
   const [editingOrder, setEditingOrder] = useState<
     (typeof orderHistory)[0] | null
   >(null);
+  const printRef = useRef<HTMLDivElement>(null);
 
   // Load initial state from localStorage
   useEffect(() => {
@@ -86,10 +80,13 @@ function AppContent() {
     const savedOrderHistory = localStorage.getItem("orderHistory");
     if (savedOrderHistory) {
       try {
-        setOrderHistory(JSON.parse(savedOrderHistory));
+        const parsedHistory = JSON.parse(savedOrderHistory);
+        // Initialize order history with saved data
+        parsedHistory.forEach((order: Order) => {
+          addOrder(order.establishmentName, order.products);
+        });
       } catch (error) {
         console.error("Failed to load order history:", error);
-        setOrderHistory([]);
       }
     }
 
@@ -97,10 +94,10 @@ function AppContent() {
     const savedOrderNumber = localStorage.getItem("orderNumber");
     if (savedOrderNumber) {
       try {
-        setOrderNumber(parseInt(savedOrderNumber, 10));
+        const number = parseInt(savedOrderNumber, 10);
+        // We'll handle this through the hook's state
       } catch (error) {
         console.error("Failed to load order number:", error);
-        setOrderNumber(1);
       }
     }
   }, []);
@@ -109,14 +106,6 @@ function AppContent() {
   useEffect(() => {
     localStorage.setItem("favorites", JSON.stringify(favorites));
   }, [favorites]);
-
-  useEffect(() => {
-    localStorage.setItem("orderHistory", JSON.stringify(orderHistory));
-  }, [orderHistory]);
-
-  useEffect(() => {
-    localStorage.setItem("orderNumber", orderNumber.toString());
-  }, [orderNumber]);
 
   const getCleanTableContent = (establishmentName: string) => {
     return `
@@ -254,76 +243,54 @@ function AppContent() {
   };
 
   const handlePrint = useReactToPrint({
-    documentTitle: "Restaurant Order",
-    onBeforeGetContent: () => {
-      const establishmentName = prompt("Enter establishment name:");
-      if (!establishmentName) return Promise.reject();
-
-      if (printRef.current) {
-        printRef.current.innerHTML = getCleanTableContent(establishmentName);
-      }
-      return Promise.resolve();
-    },
+    content: () => printRef.current,
     onAfterPrint: () => {
-      if (printRef.current) {
-        printRef.current.innerHTML = "";
-      }
-      // Save to order history
       const establishmentName = prompt("Enter establishment name:");
       if (establishmentName) {
-        const newOrder = {
-          id: Date.now().toString(),
-          establishmentName,
-          date: new Date().toLocaleDateString(),
-          products: state.products.filter(
-            (p) => p.boxQuantity > 0 || p.bottleQuantity > 0
-          ),
-        };
-        setOrderHistory((prev) => [newOrder, ...prev].slice(0, 10));
-        setOrderNumber((prev) => prev + 1);
+        addOrder(establishmentName, state.products);
       }
     },
-    onPrintError: (error: Error) => {
-      console.error("Print failed:", error);
-    },
-    removeAfterPrint: true,
-    content: () => printRef.current,
-  } as any);
+  });
 
   const handleDownload = () => {
     const establishmentName = prompt("Enter establishment name:");
     if (!establishmentName) return;
 
-    const content = getCleanTableContent(establishmentName);
-    const blob = new Blob([content], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${establishmentName}-${new Date().toLocaleDateString()}-Order${orderNumber}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    // Save to order history
-    const newOrder = {
-      id: Date.now().toString(),
-      establishmentName,
-      date: new Date().toLocaleDateString(),
-      products: state.products.filter(
-        (p) => p.boxQuantity > 0 || p.bottleQuantity > 0
-      ),
-    };
-    setOrderHistory((prev) => [newOrder, ...prev].slice(0, 10));
-    setOrderNumber((prev) => prev + 1);
+    const content = printRef.current?.innerHTML;
+    if (content) {
+      const blob = new Blob([content], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${establishmentName}-${new Date().toLocaleDateString()}-Order${orderNumber}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      addOrder(establishmentName, state.products);
+    }
   };
 
   const addProduct = () => {
     if (newProduct.name && state.selectedCategory) {
+      // Check if product already exists in this category (case-insensitive)
+      const productExists = state.products.some(
+        (p) =>
+          p.name.toLowerCase().trim() ===
+            newProduct.name.toLowerCase().trim() &&
+          p.category.toLowerCase().trim() ===
+            state.selectedCategory.toLowerCase().trim()
+      );
+
+      if (productExists) {
+        alert("A product with this name already exists in this category!");
+        return;
+      }
+
       const product: Product = {
         id: Date.now().toString(),
-        name: newProduct.name,
-        category: state.selectedCategory,
+        name: newProduct.name.trim(),
+        category: state.selectedCategory.trim(),
         boxQuantity: 0,
         bottleQuantity: 0,
         createdAt: Date.now(),
@@ -527,10 +494,10 @@ function AppContent() {
   };
 
   // Add this function to handle reordering
-  const handleReorder = (order: (typeof orderHistory)[0]) => {
+  const handleReorder = (order: Order) => {
     if (
       confirm(
-        "This will reset current quantities and apply the selected order. Continue?"
+        "Are you sure you want to reorder these items? This will reset your current order."
       )
     ) {
       // Reset all quantities first
@@ -546,64 +513,23 @@ function AppContent() {
         });
       });
 
-      // Create a map of existing categories (case-insensitive)
-      const existingCategories = new Map(
-        state.categories.map((cat) => [cat.name.toLowerCase(), cat])
-      );
-
       // Then set the quantities from the order
-      order.products.forEach((product) => {
-        const normalizedProductName = product.name.toLowerCase().trim();
-        const normalizedCategoryName = product.category.toLowerCase().trim();
-
-        // Find existing product by name and category (case-insensitive)
+      order.products.forEach((orderedProduct) => {
         const existingProduct = state.products.find(
           (p) =>
-            p.name.toLowerCase().trim() === normalizedProductName &&
-            p.category.toLowerCase().trim() === normalizedCategoryName
+            p.name === orderedProduct.name &&
+            p.category === orderedProduct.category
         );
-
         if (existingProduct) {
-          // Update existing product quantities
           dispatch({
             type: "UPDATE_PRODUCT",
             payload: {
               ...existingProduct,
-              boxQuantity: product.boxQuantity,
-              bottleQuantity: product.bottleQuantity,
+              boxQuantity: orderedProduct.boxQuantity,
+              bottleQuantity: orderedProduct.bottleQuantity,
               updatedAt: Date.now(),
             },
           });
-        } else {
-          // Check if category exists (case-insensitive)
-          const existingCategory = existingCategories.get(
-            normalizedCategoryName
-          );
-
-          // If category doesn't exist, create it
-          if (!existingCategory) {
-            const newCategory: Category = {
-              id: Date.now().toString(),
-              name: product.category.trim(),
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            };
-            dispatch({ type: "ADD_CATEGORY", payload: newCategory });
-            // Add to our map to prevent duplicates
-            existingCategories.set(normalizedCategoryName, newCategory);
-          }
-
-          // Create the missing product
-          const newProduct: Product = {
-            ...product,
-            id: Date.now().toString(),
-            category: existingCategory
-              ? existingCategory.name
-              : product.category.trim(),
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-          dispatch({ type: "ADD_PRODUCT", payload: newProduct });
         }
       });
     }
@@ -643,30 +569,25 @@ function AppContent() {
   };
 
   const handleOrderContextMenuAction = (
-    action: "delete" | "edit" | "favorite"
+    action: "edit" | "delete" | "reorder"
   ) => {
     if (!orderContextMenu) return;
 
-    const order = orderHistory.find((o) => o.id === orderContextMenu.orderId);
-    if (!order) return;
-
     if (action === "delete") {
-      if (confirm("Are you sure you want to delete this order from history?")) {
-        const newOrderHistory = orderHistory.filter(
-          (o) => o.id !== orderContextMenu.orderId
-        );
-        setOrderHistory(newOrderHistory);
-        localStorage.setItem("orderHistory", JSON.stringify(newOrderHistory));
+      if (confirm("Are you sure you want to delete this order?")) {
+        deleteOrder(orderContextMenu.orderId);
       }
     } else if (action === "edit") {
-      setEditingOrder(order);
-      setIsEditModalOpen(true);
-    } else if (action === "favorite") {
-      const newFavorites = favorites.includes(order.id)
-        ? favorites.filter((id) => id !== order.id)
-        : [...favorites, order.id];
-      setFavorites(newFavorites);
-      localStorage.setItem("favorites", JSON.stringify(newFavorites));
+      const order = orderHistory.find((o) => o.id === orderContextMenu.orderId);
+      if (order) {
+        setEditingOrder(order);
+        setIsEditModalOpen(true);
+      }
+    } else if (action === "reorder") {
+      const order = orderHistory.find((o) => o.id === orderContextMenu.orderId);
+      if (order) {
+        handleReorder(order);
+      }
     }
 
     setOrderContextMenu(null);
@@ -695,36 +616,7 @@ function AppContent() {
       }`}
     >
       <div className="max-w-4xl mx-auto p-4">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={
-                state.darkMode ? (
-                  <SunIcon className="h-5 w-5" />
-                ) : (
-                  <MoonIcon className="h-5 w-5" />
-                )
-              }
-              onClick={toggleDarkMode}
-            >
-              {state.darkMode ? "Light Mode" : "Dark Mode"}
-            </Button>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">
-              Calco
-            </h1>
-            <div className="w-24" /> {/* Spacer for alignment */}
-          </div>
-          <p
-            className={`mt-2 ${
-              state.darkMode ? "text-gray-400" : "text-gray-600"
-            }`}
-          >
-            Manage your restaurant orders efficiently
-          </p>
-        </div>
+        <Header />
 
         {/* Search Bar */}
         <div className="mb-6">
@@ -912,20 +804,79 @@ function AppContent() {
                           : "border-gray-200 bg-white"
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-2">
+                      <div className="flex justify-between items-start mb-2">
                         <div>
-                          <h3 className="font-medium">
+                          <h3
+                            className={`font-bold ${
+                              state.darkMode ? "text-gray-200" : "text-gray-800"
+                            }`}
+                          >
                             {order.establishmentName}
                           </h3>
-                          <p className="text-sm text-gray-500">{order.date}</p>
+                          <p
+                            className={`text-sm ${
+                              state.darkMode ? "text-gray-400" : "text-gray-600"
+                            }`}
+                          >
+                            {order.date}
+                          </p>
                         </div>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleReorder(order)}
-                        >
-                          Reorder
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleReorder(order)}
+                          >
+                            Reorder
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  "Are you sure you want to delete this order?"
+                                )
+                              ) {
+                                deleteOrder(order.id);
+                              }
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                      <div
+                        className={`mt-2 text-sm ${
+                          state.darkMode ? "text-gray-400" : "text-gray-600"
+                        }`}
+                      >
+                        {order.products
+                          .filter(
+                            (p) => p.boxQuantity > 0 || p.bottleQuantity > 0
+                          )
+                          .map((product) => (
+                            <div
+                              key={product.id}
+                              className="flex justify-between"
+                            >
+                              <span>{product.name}</span>
+                              <span>
+                                {product.boxQuantity > 0 && (
+                                  <span className="mr-2">
+                                    {product.boxQuantity} box
+                                    {product.boxQuantity > 1 ? "es" : ""}
+                                  </span>
+                                )}
+                                {product.bottleQuantity > 0 && (
+                                  <span>
+                                    {product.bottleQuantity} bottle
+                                    {product.bottleQuantity > 1 ? "s" : ""}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          ))}
                       </div>
                     </motion.div>
                   ))}
@@ -958,19 +909,11 @@ function AppContent() {
               className="w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-2"
               onClick={(e) => {
                 e.preventDefault();
-                handleOrderContextMenuAction("favorite");
+                handleOrderContextMenuAction("reorder");
               }}
             >
-              <StarIcon
-                className={`h-4 w-4 ${
-                  favorites.includes(orderContextMenu.orderId)
-                    ? "text-yellow-500"
-                    : "text-gray-400"
-                }`}
-              />
-              {favorites.includes(orderContextMenu.orderId)
-                ? "Remove from Favorites"
-                : "Add to Favorites"}
+              <ArrowPathIcon className="h-4 w-4" />
+              Reorder
             </button>
             <button
               className="w-full px-4 py-2 text-left hover:bg-gray-100 text-red-600 flex items-center gap-2"
@@ -1198,99 +1141,15 @@ function AppContent() {
                     </h3>
                     <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
                       {categoryProducts.map((product) => (
-                        <motion.div
+                        <ProductItem
                           key={product.id}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -20 }}
-                          onContextMenu={(e) =>
-                            handleContextMenu(e, product.id, "product")
+                          product={product}
+                          selectedQuantityType={
+                            selectedQuantityType[product.id] || "box"
                           }
-                          className={`flex flex-col p-2 rounded-lg hover:bg-gray-50 cursor-context-menu ${
-                            state.darkMode ? "hover:bg-gray-700" : ""
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span
-                              className={`font-medium ${
-                                state.darkMode
-                                  ? "text-gray-300"
-                                  : "text-gray-700"
-                              }`}
-                            >
-                              {product.name}
-                            </span>
-                            <motion.button
-                              onClick={() => toggleQuantityType(product.id)}
-                              className={`text-sm px-2 py-1 rounded flex items-center gap-1 ${
-                                state.darkMode
-                                  ? "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                                  : "bg-gray-100 hover:bg-gray-200 text-gray-700"
-                              }`}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
-                            >
-                              {selectedQuantityType[product.id] === "bottle" ? (
-                                <>
-                                  <BeakerIcon className="h-4 w-4" />
-                                  Bottle
-                                </>
-                              ) : (
-                                <>
-                                  <CubeIcon className="h-4 w-4" />
-                                  Box
-                                </>
-                              )}
-                            </motion.button>
-                          </div>
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              onClick={() =>
-                                updateQuantity(
-                                  product.id,
-                                  selectedQuantityType[product.id] || "box",
-                                  -1
-                                )
-                              }
-                              variant="danger"
-                              size="sm"
-                              className="min-w-[28px] h-7 px-1 opacity-60 hover:opacity-100 bg-red-500/80 hover:bg-red-500 flex items-center justify-center"
-                              icon={<MinusIcon className="h-3 w-3" />}
-                              data-product-id={product.id}
-                              data-quantity-type={
-                                selectedQuantityType[product.id] || "box"
-                              }
-                            />
-                            <span
-                              className={`w-8 text-center font-medium ${
-                                state.darkMode
-                                  ? "text-gray-300"
-                                  : "text-gray-700"
-                              }`}
-                            >
-                              {selectedQuantityType[product.id] === "bottle"
-                                ? product.bottleQuantity
-                                : product.boxQuantity}
-                            </span>
-                            <Button
-                              onClick={() =>
-                                updateQuantity(
-                                  product.id,
-                                  selectedQuantityType[product.id] || "box",
-                                  1
-                                )
-                              }
-                              variant="success"
-                              size="sm"
-                              className="min-w-[28px] h-7 px-1 opacity-60 hover:opacity-100 bg-green-500/80 hover:bg-green-500 flex items-center justify-center"
-                              icon={<PlusIcon className="h-3 w-3" />}
-                              data-product-id={product.id}
-                              data-quantity-type={
-                                selectedQuantityType[product.id] || "box"
-                              }
-                            />
-                          </div>
-                        </motion.div>
+                          onToggleQuantityType={toggleQuantityType}
+                          onContextMenu={handleContextMenu}
+                        />
                       ))}
                     </div>
                   </div>
@@ -1418,11 +1277,6 @@ function AppContent() {
                 setEditingOrder(updatedOrder);
                 const newOrderHistory = orderHistory.map((order) =>
                   order.id === editingOrder.id ? updatedOrder : order
-                );
-                setOrderHistory(newOrderHistory);
-                localStorage.setItem(
-                  "orderHistory",
-                  JSON.stringify(newOrderHistory)
                 );
               }}
             />
